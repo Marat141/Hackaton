@@ -1,0 +1,52 @@
+{
+  "cesky-jazyk": {
+    "book-1": {
+      "unit-1": { "pages": 5 },
+      "unit-2": { "pages": 5 }
+    },
+    "book-2": {
+      "unit-1": { "pages": 5 },
+      "unit-2": { "pages": 5 }
+    }
+  },
+  "anglicky-jazyk": {
+    "book-1": {
+      "unit-1": { "pages": 5 },
+      "unit-2": { "pages": 5 }
+    },
+    "book-2": {
+      "unit-1": { "pages": 5 },
+      "unit-2": { "pages": 5 }
+    }
+  },
+  "dejepis": {
+    "book-1": {
+      "unit-1": { "pages": 5 },
+      "unit-2": { "pages": 5 }
+    },
+    "book-2": {
+      "unit-1": { "pages": 5 },
+      "unit-2": { "pages": 5 }
+    }
+  },
+  "zemepis": {
+    "book-1": {
+      "unit-1": { "pages": 4 },
+      "unit-2": { "pages": 5 }
+    },
+    "book-2": {
+      "unit-1": { "pages": 5 },
+      "unit-2": { "pages": 5 }
+    }
+  },
+  "prirodopis": {
+    "book-1": {
+      "unit-1": { "pages": 5 },
+      "unit-2": { "pages": 5 }
+    },
+    "book-2": {
+      "unit-1": { "pages": 5 },
+      "unit-2": { "pages": 5 }
+    }
+  }
+}
