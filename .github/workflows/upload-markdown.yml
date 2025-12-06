@@ -1,0 +1,31 @@
+name: Upload Markdown to Turso
+
+on:
+  push:
+    branches:
+      - Content  # Tento workflow se spustí při každém pushnutí do větve Content
+    paths:
+      - 'content/english/**/*'  # Tento filtr znamená, že se akce spustí pouze při změnách v této složce
+
+jobs:
+  upload-markdown:
+    runs-on: ubuntu-latest  # Tento job běží na Ubuntu prostředí
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2  # Stáhneme kód z repozitáře
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '16'  # Určte verzi Node.js podle toho, co používáte v projektu
+
+      - name: Install dependencies
+        run: |
+          npm install  # Nainstalujte závislosti
+
+      - name: Run script to upload markdown
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}  # Turso DB URL z GitHub secrets
+          DATABASE_AUTH_TOKEN: ${{ secrets.DATABASE_AUTH_TOKEN }}  # Turso Auth Token z GitHub secrets
+        run: |
+          node upload-markdown.js  # Skript, který se postará o upload souborů do Turso
