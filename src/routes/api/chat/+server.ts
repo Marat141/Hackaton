@@ -1,121 +1,184 @@
-// src/routes/api/chat/+server.ts
+// src/routes/api/chat/+server.ts - FINÁLNÍ FUNKČNÍ VERZE
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
-import { GoogleGenAI } from '@google/genai'; // Official library[citation:1][citation:3]
+import { GoogleGenAI } from '@google/genai';
+import { searchRelevantNotes, getNotesByUnit } from '$lib/server/content';
 
-// Initialize Google GenAI with your API key
 const GEMINI_API_KEY = env.GEMINI_API_KEY || env.GOOGLE_API_KEY;
 
 if (!GEMINI_API_KEY) {
-  console.error('⚠️ Gemini API key is missing. Please set GEMINI_API_KEY or GOOGLE_API_KEY in .env file');
+  console.error('⚠️ Gemini API key is missing');
 }
 
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
+async function getRelevantContext(query: string, currentUnit?: string): Promise<string> {
+  try {
+    console.log(`🔍 AI Context search for: "${query.substring(0, 50)}..."`);
+    
+    // 1. Vyhledej relevantní poznámky
+    const relevantNotes = await searchRelevantNotes(query, 3);
+    console.log(`📚 Found ${relevantNotes.length} relevant notes from search`);
+    
+    // 2. Pokud máme currentUnit, přidej její poznámky
+    let unitNotes: any[] = [];
+    if (currentUnit) {
+      console.log(`📖 Getting notes for Unit ${currentUnit}`);
+      const notes = await getNotesByUnit('english', `Unit-${currentUnit}`);
+      unitNotes = notes;
+      console.log(`📖 Found ${notes.length} notes for Unit ${currentUnit}`);
+    }
+    
+    // 3. Kombinuj výsledky bez duplicit
+    const allNotes = [...relevantNotes];
+    const addedIds = new Set(relevantNotes.map(n => n.id));
+    
+    unitNotes.forEach(unitNote => {
+      if (!addedIds.has(unitNote.id)) {
+        allNotes.push({
+          ...unitNote,
+          excerpt: unitNote.content?.substring(0, 200) + '...' || ''
+        });
+        addedIds.add(unitNote.id);
+      }
+    });
+
+    if (allNotes.length === 0) {
+      console.log('📭 No relevant notes found in database');
+      return '';
+    }
+
+    console.log(`📋 Using ${allNotes.length} total notes for context`);
+    
+    // 4. Sestav kontext pro AI
+    let context = "STUDENT'S NOTES FROM DATABASE (Use this information to answer):\n\n";
+    
+    allNotes.forEach((note, index) => {
+      context += `=== NOTE ${index + 1}: ${note.subject} - ${note.unit} ===\n`;
+      context += `📄 File: ${note.file_name}\n`;
+      
+      // Použij content nebo excerpt
+      const content = note.content || '';
+      const contentPreview = content.length > 800 
+        ? content.substring(0, 800) + '...' 
+        : content;
+      
+      context += `${contentPreview}\n\n`;
+    });
+
+    context += "INSTRUCTIONS FOR AI:\n";
+    context += "1. Use the notes above to answer the student's question\n";
+    context += "2. Reference specific sections when possible\n";
+    context += "3. Keep answers clear and educational\n";
+    context += "4. Respond in Czech if the question is in Czech\n\n";
+    
+    return context;
+    
+  } catch (error: any) {
+    console.error('❌ Error getting context:', error.message);
+    return '';
+  }
+}
+
 export async function POST({ request }) {
   try {
-    // Check for API key
     if (!GEMINI_API_KEY) {
       return json(
         { 
-          error: 'API key not configured. Please set GEMINI_API_KEY in .env file.',
-          message: '⚠️ API klíč není nastavený. Zkontrolujte prosím konfiguraci v .env souboru.'
+          error: 'API key not configured',
+          message: '⚠️ API klíč není nastavený'
         }, 
         { status: 500 }
       );
     }
 
-    // Parse request body
-    const { messages }: { messages: { role: string; content: string }[] } = await request.json();
+    const { messages, currentUnit }: { 
+      messages: { role: string; content: string }[],
+      currentUnit?: string 
+    } = await request.json();
 
     if (!messages || !Array.isArray(messages)) {
       return json({ error: 'Messages array is required' }, { status: 400 });
     }
 
-    // System message for the assistant
-    const systemMessage = {
-      role: 'system',
-      content: `Jsi užitečný AI asistent pro studenty, který pomáhá s učením a porozuměním učebnicím a pracovním sešitům. 
-      Odpovídej stručně, přehledně a zaměřuj se na klíčové informace. 
-      Pomáhej studentům pochopit složité koncepty jednoduchým způsobem.
-      Odpovídej v češtině, pokud student píše česky.`
-    };
+    // Získej poslední zprávu uživatele
+    const lastUserMessage = messages
+      .filter(msg => msg.role === 'user')
+      .pop()?.content || '';
+    
+    console.log(`💬 Chat request - Unit: ${currentUnit || 'none'}, Message: "${lastUserMessage.substring(0, 50)}..."`);
 
-    // Format messages for Gemini API
-    // Gemini expects contents as an array where each item is a complete turn in conversation
+    // Získej kontext z databáze
+    const dbContext = await getRelevantContext(lastUserMessage, currentUnit);
+    
+    // System prompt s kontextem
+    const systemMessage = dbContext 
+      ? `Jsi AI učitel angličtiny. Máš přístup k poznámkám studenta:\n\n${dbContext}\n\nOdpovídej na základě těchto poznámek.`
+      : `Jsi AI učitel angličtiny. Pomáhej studentům s učením angličtiny.`;
+
+    // Formátování pro Gemini API
     const contents = [
-      // First content: system message as user role (this is how Gemini handles system prompts)
       {
         role: 'user',
-        parts: [{ text: systemMessage.content }]
+        parts: [{ text: systemMessage }]
       },
-      // Second content: assistant's initial response
       {
         role: 'model',
-        parts: [{ text: 'Rozumím. Jsem AI asistent připravený pomoci s učením. Jakou otázku máš?' }]
+        parts: [{ text: 'Rozumím. Jsem připraven odpovídat na otázky o angličtině.' }]
       },
-      // Add all conversation messages
       ...messages.map(msg => ({
         role: msg.role === 'user' ? 'user' : 'model',
         parts: [{ text: msg.content }]
       }))
     ];
 
-    // Make API call to Gemini
+    // Volání Gemini API
+    console.log('🤖 Calling Gemini API...');
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-lite', // You can change this to gemini-2.0-flash or gemini-1.5-flash
+      model: 'gemini-2.0-flash',
       contents: contents,
       config: {
-        temperature: 0.7,
-        maxOutputTokens: 1000,
+        temperature: 0.3,
+        maxOutputTokens: 1500,
         topP: 0.8,
         topK: 40
       }
     });
 
-    // Extract response text
     const assistantMessage = response.text;
 
     if (!assistantMessage) {
       throw new Error('Gemini API returned empty response');
     }
 
-    // Return success response
+    console.log('✅ AI response generated');
+    
     return json({
       message: assistantMessage,
-      role: 'assistant'
+      role: 'assistant',
+      metadata: {
+        usedContext: dbContext.length > 0,
+        contextLength: dbContext.length,
+        notesUsed: dbContext.length > 0 ? 'From database' : 'No context'
+      }
     });
 
-  } catch (error: unknown) {
-    console.error('Chat API error:', error);
-
-    // Handle specific error types
+  } catch (error: any) {
+    console.error('❌ Chat API error:', error);
+    
     let errorMessage = 'Došlo k chybě při zpracování požadavku';
-    let statusCode = 500;
-
-    if (error instanceof Error) {
-      // Check for API key errors
-      if (error.message.includes('API key') || error.message.includes('authentication')) {
-        errorMessage = 'Neplatný nebo chybějící API klíč. Zkontrolujte GEMINI_API_KEY v .env souboru.';
-      } 
-      // Check for quota/limit errors
-      else if (error.message.includes('quota') || error.message.includes('limit') || error.message.includes('rate limit')) {
-        errorMessage = 'Překročen limit API. Zkontrolujte prosím svůj billing a quota v Google AI Studio.';
-      }
-      // Check for model availability errors
-      else if (error.message.includes('model') || error.message.includes('not found')) {
-        errorMessage = 'Model není dostupný. Zkuste změnit model na gemini-1.5-flash nebo gemini-1.0-pro.';
-      } else {
-        errorMessage = error.message;
-      }
+    if (error.message.includes('API key')) {
+      errorMessage = 'Chybějící API klíč. Zkontrolujte GEMINI_API_KEY v .env';
+    } else if (error.message.includes('quota')) {
+      errorMessage = 'Překročen limit API. Zkontrolujte quota v Google AI Studio.';
     }
-
+    
     return json(
       {
         error: errorMessage,
         message: `⚠️ ${errorMessage}`
       },
-      { status: statusCode }
+      { status: 500 }
     );
   }
 }

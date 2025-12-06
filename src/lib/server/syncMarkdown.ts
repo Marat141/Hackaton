@@ -1,3 +1,4 @@
+//src\lib\server\syncMarkdown.ts
 import fs from 'fs';
 import * as path from 'path';
 import { db } from './db';
