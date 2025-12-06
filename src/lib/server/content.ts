@@ -2,7 +2,7 @@
 import { marked } from 'marked';
 import { db } from './db';
 import { markdownFiles } from './db/schema';
-import { eq, like, or, and } from 'drizzle-orm';
+import { eq, like, or, and, ilike } from 'drizzle-orm';
 
 // Typ pro výsledky vyhledávání
 export interface SearchResult {
@@ -108,21 +108,38 @@ interface UnitNote {
   updated_at: string | null;
 }
 
-export async function getNotesByUnit(subject: string, unit: string): Promise<UnitNote[]> {
+// Pomocná funkce pro normalizaci názvu unit
+function normalizeUnitName(unit: string): string {
+  if (!unit) return '';
+  
+  // Odstraníme případný předponu "unit-", "Unit-", "UNIT-"
+  const cleanUnit = unit.replace(/^(unit-|Unit-|UNIT-)/i, '');
+  
+  // Vrátíme normalizovaný formát "Unit-číslo"
+  if (cleanUnit.match(/^\d+$/)) {
+    return `Unit-${cleanUnit}`;
+  }
+  
+  // Pokud už je ve správném formátu, vrátíme jak je
+  return unit;
+}
+
+export async function getNotesByUnit(subject: string, unit: string): Promise<any[]> {
   try {
     const results = await db
       .select()
       .from(markdownFiles)
       .where(
         and(
-          eq(markdownFiles.subject, subject.toLowerCase()),
-          eq(markdownFiles.unit, unit)
+          eq(markdownFiles.subject, subject.toLowerCase()),  // Ujistěte se, že subject je ve správném formátu
+          eq(markdownFiles.unit, unit.toLowerCase())  // Ujistěte se, že unit je také správně zpracován
         )
       );
 
     return results;
   } catch (error) {
-    console.error('Error fetching notes by unit:', error);
+    console.error('Chyba při získávání poznámek podle jednotky:', error);
     return [];
   }
 }
+

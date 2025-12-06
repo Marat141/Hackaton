@@ -1,45 +1,45 @@
-// src/routes/[subject]/unit/[unit]/+page.server.ts
 import type { PageServerLoad } from './$types';
 import { fetchMarkdownFromDB } from '$lib/server/content';
 
 export const load: PageServerLoad = async ({ params }) => {
-	const { subject, unit } = params; // subject (předmět) a unit (jednotka)
+  const { subject, unit } = params; // Získání parametrů z URL (dejepis, unit-1)
 
-	// Ověříme, jestli máme validní předmět
-	const validSubjects = ['english', 'dejepis']; // Tady přidáme podporu pro více předmětů
+  // Zkontrolujeme, zda máme platný předmět
+  const validSubjects = ['english', 'dejepis', 'zemepis', 'prirodopis']; // Seznam podporovaných předmětů
 
-	if (!validSubjects.includes(subject)) {
-		return {
-			subject,
-			unit,
-			markdown: '',
-			html: '<p>Invalid subject.</p>',
-			error: 'Subject not found'
-		};
-	}
+  if (!validSubjects.includes(subject)) {
+    return {
+      subject,
+      unit,
+      markdown: '',
+      html: '<p>Neplatný předmět.</p>',
+      error: 'Předmět nenalezen'
+    };
+  }
 
-	// Definujeme cestu pro soubory s konkrétním názvem podle předmětu
-	const filePath = `${subject}/Unit-${unit}-${subject}-notes.md`; // Např. "english/Unit-1-english-notes.md" nebo "dejepis/Unit-1-dejepis-notes.md"
+  // Vytvoříme cestu k souboru pro markdown na základě subject a unit
+  const filePath = `${subject}/Unit-${unit.split('-')[1]}-${subject}-notes.md`;
 
-	try {
-		const { markdown, html, metadata } = await fetchMarkdownFromDB(filePath);
+  try {
+    // Načteme obsah markdown souboru z databáze
+    const { markdown, html, metadata } = await fetchMarkdownFromDB(filePath);
 
-		return {
-			subject,
-			unit,
-			markdown,
-			html,
-			metadata,
-			filePath
-		};
-	} catch (err) {
-		// Pokud soubor není nalezen, vrátíme výchozí hodnoty
-		return {
-			subject,
-			unit,
-			markdown: '',
-			html: '<p>Notes for this unit are not available yet.</p>',
-			error: 'Notes not found in database'
-		};
-	}
+    return {
+      subject,
+      unit,
+      markdown,
+      html,
+      metadata,
+      filePath
+    };
+  } catch (err) {
+    // Pokud soubor není nalezen, vrátíme výchozí hodnoty
+    return {
+      subject,
+      unit,
+      markdown: '',
+      html: '<p>Poznámky pro tuto jednotku nejsou k dispozici.</p>',
+      error: 'Poznámky nenalezeny v databázi'
+    };
+  }
 };

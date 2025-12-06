@@ -1,207 +1,223 @@
 // src/routes/api/chat/+server.ts
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
-import { GoogleGenAI } from '@google/genai';
-import { searchRelevantNotes, getNotesByUnit } from '$lib/server/content';
+import Groq from 'groq-sdk';
+import { getNotesByUnit, searchRelevantNotes } from '$lib/server/content';
 
-const GEMINI_API_KEY = env.GEMINI_API_KEY || env.GOOGLE_API_KEY;
+/** @type {import('./$types').RequestHandler} */
+console.log('Env keys', { GROQ: !!env.GROQ_API_KEY, OPENAI: !!env.OPENAI_API_KEY });
 
-if (!GEMINI_API_KEY) {
-	console.error('⚠️ Gemini API key is missing');
-}
+// Funkce pro získání relevantního kontextu na základě předmětu a unity
+// Vrací jak kontext, tak seznam poznámek pro metadata
+async function getRelevantContext(
+    query: string, 
+    subject?: string, 
+    currentUnit?: string
+): Promise<{ context: string; notes: any[] }> {
+    try {
+        console.log(`🔍 AI Context search - Subject: ${subject || 'any'}, Unit: ${currentUnit || 'any'}, Query: "${query.substring(0, 50)}..."`);
 
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+        let allNotes: any[] = [];
 
-// Funkce pro generování kvízu
-async function generateQuiz(content: string): Promise<string> {
-	// Můžete použít Gemini API pro generování otázek
-	// Prozatím použijeme statický kód pro generování kvízu
-	return `Generování kvízu pro obsah: ${content}\n1. Jaké je hlavní téma?\n2. Které klíčové pojmy byly zmíněny?`;
-}
+        // 1. Pokud máme konkrétní předmět a unit, načti její poznámky
+        if (subject && currentUnit) {
+            console.log(`📖 Getting notes for ${subject} - Unit ${currentUnit}`);
+            const unitNotes = await getNotesByUnit(subject, `Unit-${currentUnit}`);
+            allNotes = unitNotes;
+            console.log(`📖 Found ${unitNotes.length} notes for ${subject} Unit ${currentUnit}`);
+        }
 
-// Funkce pro generování shrnutí
-async function generateSummary(content: string): Promise<string> {
-	// Používáme Gemini pro generování shrnutí
-	return `Shrnutí pro tento obsah: ${content.substring(0, 500)}...`;
-}
+        // 2. Pokud máme query, vyhledej relevantní poznámky (napříč všemi předměty)
+        if (query.trim().length > 0) {
+            console.log(`🔎 Searching relevant notes for query: "${query.substring(0, 50)}..."`);
+            const relevantNotes = await searchRelevantNotes(query, 3);
+            console.log(`📚 Found ${relevantNotes.length} relevant notes from search`);
+            
+            // Přidej relevantní poznámky, ale odstraň duplicity
+            const addedIds = new Set(allNotes.map((n) => n.id));
+            relevantNotes.forEach((note) => {
+                if (!addedIds.has(note.id)) {
+                    allNotes.push({
+                        ...note,
+                        excerpt: note.content?.substring(0, 200) + '...' || ''
+                    });
+                    addedIds.add(note.id);
+                }
+            });
+        }
 
-// Funkce pro získání relevantního kontextu pro AI
-async function getRelevantContext(query: string, currentUnit?: string): Promise<string> {
-	try {
-		console.log(`🔍 AI Context search for: "${query.substring(0, 50)}..."`);
+        if (allNotes.length === 0) {
+            console.log('📭 No relevant notes found in database');
+            return { context: '', notes: [] };
+        }
 
-		// 1. Vyhledej relevantní poznámky
-		const relevantNotes = await searchRelevantNotes(query, 3);
-		console.log(`📚 Found ${relevantNotes.length} relevant notes from search`);
+        console.log(`📋 Using ${allNotes.length} total notes for context`);
 
-		// 2. Pokud máme currentUnit, přidej její poznámky
-		let unitNotes: any[] = [];
-		if (currentUnit) {
-			console.log(`📖 Getting notes for Unit ${currentUnit}`);
-			const notes = await getNotesByUnit('english', `Unit-${currentUnit}`);
-			unitNotes = notes;
-			console.log(`📖 Found ${notes.length} notes for Unit ${currentUnit}`);
-		}
+        let context = "STUDENT'S NOTES FROM DATABASE (Use this information to answer):\n\n";
 
-		// 3. Kombinuj výsledky bez duplicit
-		const allNotes = [...relevantNotes];
-		const addedIds = new Set(relevantNotes.map((n) => n.id));
+        // Seskup poznámky podle předmětu
+        const notesBySubject: Record<string, any[]> = {};
+        allNotes.forEach((note) => {
+            if (!notesBySubject[note.subject]) {
+                notesBySubject[note.subject] = [];
+            }
+            notesBySubject[note.subject].push(note);
+        });
 
-		unitNotes.forEach((unitNote) => {
-			if (!addedIds.has(unitNote.id)) {
-				allNotes.push({
-					...unitNote,
-					excerpt: unitNote.content?.substring(0, 200) + '...' || ''
-				});
-				addedIds.add(unitNote.id);
-			}
-		});
+        // Přidej obsah podle předmětů
+        Object.entries(notesBySubject).forEach(([subject, notes]) => {
+            context += `=== ${subject.toUpperCase()} ===\n`;
+            
+            notes.forEach((note, index) => {
+                context += `--- Note ${index + 1}: ${note.unit} ---\n`;
+                context += `📄 File: ${note.file_name}\n`;
 
-		if (allNotes.length === 0) {
-			console.log('📭 No relevant notes found in database');
-			return '';
-		}
+                const content = note.content || '';
+                const contentPreview = content.length > 600 ? content.substring(0, 600) + '...' : content;
 
-		console.log(`📋 Using ${allNotes.length} total notes for context`);
+                context += `${contentPreview}\n\n`;
+            });
+            context += '\n';
+        });
 
-		// 4. Sestav kontext pro AI
-		let context = "STUDENT'S NOTES FROM DATABASE (Use this information to answer):\n\n";
+        context += 'INSTRUCTIONS FOR AI:\n';
+        context += "1. Use the notes above to answer the student's question\n";
+        context += '2. Focus on the relevant subject if specified\n';
+        context += '3. Reference specific sections when possible\n';
+        context += '4. Keep answers clear and educational\n';
+        context += '5. Respond in Czech if the question is in Czech\n\n';
 
-		allNotes.forEach((note, index) => {
-			context += `=== NOTE ${index + 1}: ${note.subject} - ${note.unit} ===\n`;
-			context += `📄 File: ${note.file_name}\n`;
-
-			// Použij content nebo excerpt
-			const content = note.content || '';
-			const contentPreview = content.length > 800 ? content.substring(0, 800) + '...' : content;
-
-			context += `${contentPreview}\n\n`;
-		});
-
-		context += 'INSTRUCTIONS FOR AI:\n';
-		context += "1. Use the notes above to answer the student's question\n";
-		context += '2. Reference specific sections when possible\n';
-		context += '3. Keep answers clear and educational\n';
-		context += '4. Respond in Czech if the question is in Czech\n\n';
-
-		return context;
-	} catch (error: any) {
-		console.error('❌ Error getting context:', error.message);
-		return '';
-	}
+        return { context, notes: allNotes };
+    } catch (error: any) {
+        console.error('❌ Error getting context:', error.message);
+        return { context: '', notes: [] };
+    }
 }
 
 export async function POST({ request }) {
-	try {
-		if (!GEMINI_API_KEY) {
-			return json(
-				{
-					error: 'API key not configured',
-					message: '⚠️ API klíč není nastavený'
-				},
-				{ status: 500 }
-			);
-		}
+    try {
+        const { messages, action, subject, currentUnit } = await request.json();
 
-		const {
-			messages,
-			action,
-			currentUnit
-		}: {
-			messages: { role: string; content: string }[];
-			action: string;
-			currentUnit?: string;
-		} = await request.json();
+        if (!messages || !Array.isArray(messages)) {
+            return json({ error: 'Messages array is required' }, { status: 400 });
+        }
 
-		if (!messages || !Array.isArray(messages)) {
-			return json({ error: 'Messages array is required' }, { status: 400 });
-		}
+        // Získej poslední zprávu uživatele
+        const lastUserMessage = messages.filter((msg) => msg.role === 'user').pop()?.content || '';
 
-		// Získej poslední zprávu uživatele
-		const lastUserMessage = messages.filter((msg) => msg.role === 'user').pop()?.content || '';
+        console.log(`💬 Chat request - Subject: ${subject || 'any'}, Unit: ${currentUnit || 'any'}, Action: ${action || 'chat'}, Message: "${lastUserMessage.substring(0, 50)}..."`);
 
-		console.log(
-			`💬 Chat request - Unit: ${currentUnit || 'none'}, Message: "${lastUserMessage.substring(0, 50)}..."`
-		);
+        // Získej kontext z databáze na základě předmětu a unity
+        const { context: dbContext, notes: allNotes } = await getRelevantContext(lastUserMessage, subject, currentUnit);
 
-		// Získej kontext z databáze
-		const dbContext = await getRelevantContext(lastUserMessage, currentUnit);
+        // System prompt s kontextem
+        const systemContent = dbContext
+            ? `Jsi AI učitel. ${
+                subject ? `Uživatel se aktuálně učí ${subject}. ` : ''
+            }${
+                currentUnit ? `Nachází se v Unit ${currentUnit}. ` : ''
+            }Vždy si načti relevantní data a čerpej exluzivně z nich data:\n\n${dbContext}\n\nOdpovídej na základě těchto poznámek. Odpovídej v češtině.`
+            : `Jsi užitečný AI asistent pro studenty, který pomáhá s učením. 
+               Odpovídej stručně, přehledně a zaměřuj se na klíčové informace. 
+               Pomáhej studentům pochopit složité koncepty jednoduchým způsobem.
+               Odpovídej v češtině, pokud student píše češtinou.`;
 
-		// Generování kvízu nebo shrnutí na základě akce
-		let responseContent = '';
-		if (action === 'quiz') {
-			responseContent = await generateQuiz(dbContext);
-		} else if (action === 'summary') {
-			responseContent = await generateSummary(dbContext);
-		}
+        const systemMessage = {
+            role: 'system',
+            content: systemContent
+        };
 
-		// System prompt s kontextem
-		const systemMessage = dbContext
-			? `Jsi AI učitel angličtiny. Máš přístup k poznámkám studenta:\n\n${dbContext}\n\nOdpovídej na základě těchto poznámek.`
-			: `Jsi AI učitel angličtiny. Pomáhej studentům s učením angličtiny.`;
+        // Přidej system message na začátek konverzace
+        const conversationMessages = [systemMessage, ...messages];
 
-		// Formátování pro Gemini API
-		const contents = [
-			{
-				role: 'user',
-				parts: [{ text: systemMessage }]
-			},
-			{
-				role: 'model',
-				parts: [{ text: 'Rozumím. Jsem připraven odpovídat na otázky o angličtině.' }]
-			},
-			...messages.map((msg) => ({
-				role: msg.role === 'user' ? 'user' : 'model',
-				parts: [{ text: msg.content }]
-			}))
-		];
+        let assistantMessage = null;
 
-		// Volání Gemini API
-		console.log('🤖 Calling Gemini API...');
-		const response = await ai.models.generateContent({
-			model: 'gemini-2.0-flash',
-			contents: contents,
-			config: {
-				temperature: 0.3,
-				maxOutputTokens: 1500,
-				topP: 0.8,
-				topK: 40
-			}
-		});
+        // Groq model
+        const groqModel = env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 
-		const assistantMessage = response.text;
+        // Zkus nejdřív Groq
+        if (env.GROQ_API_KEY) {
+            try {
+                const groq = new Groq({
+                    apiKey: env.GROQ_API_KEY
+                });
 
-		if (!assistantMessage) {
-			throw new Error('Gemini API returned empty response');
-		}
+                const completion = await groq.chat.completions.create({
+                    model: groqModel,
+                    messages: conversationMessages,
+                    temperature: 0.3,
+                    max_tokens: 2000
+                });
 
-		console.log('✅ AI response generated');
+                assistantMessage = completion.choices[0]?.message?.content;
+                
+                console.log(`✅ Groq response generated with model: ${groqModel}`);
 
-		return json({
-			message: assistantMessage,
-			role: 'assistant',
-			metadata: {
-				usedContext: dbContext.length > 0,
-				contextLength: dbContext.length,
-				notesUsed: dbContext.length > 0 ? 'From database' : 'No context'
-			}
-		});
-	} catch (error: any) {
-		console.error('❌ Chat API error:', error);
+            } catch (groqError: any) {
+                console.warn('Groq API error:', groqError?.message || groqError);
+                
+                if ((groqError?.code === 'model_decommissioned' || (groqError?.message && groqError.message.includes('decommissioned'))) && groqModel !== 'llama-3.3-70b-versatile') {
+                    try {
+                        const groqFallback = new Groq({ apiKey: env.GROQ_API_KEY });
+                        const completion2 = await groqFallback.chat.completions.create({
+                            model: 'llama-3.3-70b-versatile',
+                            messages: conversationMessages,
+                            temperature: 0.3,
+                            max_tokens: 2000
+                        });
+                        assistantMessage = completion2.choices[0]?.message?.content;
+                        console.log('✅ Groq fallback model used: llama-3.3-70b-versatile');
+                    } catch (fallbackError: any) {
+                        console.warn('Groq fallback model failed as well:', fallbackError);
+                    }
+                }
+            }
+        }
 
-		let errorMessage = 'Došlo k chybě při zpracování požadavku';
-		if (error.message.includes('API key')) {
-			errorMessage = 'Chybějící API klíč. Zkontrolujte GEMINI_API_KEY v .env';
-		} else if (error.message.includes('quota')) {
-			errorMessage = 'Překročen limit API. Zkontrolujte quota v Google AI Studio.';
-		}
+        // Pokud ani jeden provider není dostupný
+        if (!assistantMessage) {
+            return json(
+                {
+                    error: 'Žádný AI provider není nakonfigurován. Nastavte prosím GROQ_API_KEY v .env souboru.\n\n💡 Groq API klíč získáte zdarma na: https://console.groq.com/keys'
+                },
+                { status: 500 }
+            );
+        }
 
-		return json(
-			{
-				error: errorMessage,
-				message: `⚠️ ${errorMessage}`
-			},
-			{ status: 500 }
-		);
-	}
+        return json({
+            message: assistantMessage,
+            role: 'assistant',
+            metadata: {
+                subject: subject || 'not specified',
+                unit: currentUnit || 'not specified',
+                usedContext: dbContext.length > 0,
+                contextLength: dbContext.length,
+                notesUsed: allNotes.length > 0 ? `${allNotes.length} notes` : 'No context',
+                provider: 'Groq',
+                model: groqModel
+            }
+        });
+
+    } catch (error: any) {
+        console.error('Chat API error:', error);
+
+        let errorMessage = error.message || 'Došlo k chybě při zpracování požadavku';
+        let statusCode = 500;
+
+        if (error.status === 429) {
+            errorMessage = 'Překročen limit API. Zkuste to prosím za chvíli.';
+            statusCode = 429;
+        } else if (error.status === 401) {
+            errorMessage = 'Neplatný API klíč. Zkontrolujte prosím konfiguraci v .env souboru.';
+            statusCode = 401;
+        }
+
+        return json(
+            {
+                error: errorMessage,
+                message: `⚠️ ${errorMessage}`
+            },
+            { status: statusCode }
+        );
+    }
 }

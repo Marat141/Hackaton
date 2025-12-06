@@ -1,4 +1,6 @@
 <script lang="ts">
+//src\lib\components\Chatbot.svelte
+
 	// Reaktivní stavy
 	let isOpen = $state(false);
 	let messages = $state<{ role: string; content: string }[]>([]);
