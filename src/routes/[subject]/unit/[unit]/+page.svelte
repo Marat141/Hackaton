@@ -1,7 +1,8 @@
-<!-- src/routes/english/unit/[unit]/+page.svelte -->
+<!-- src/routes/[subject]/unit/[unit]/+page.svelte -->
 <script lang="ts">
 	const props = $props<{
 		data: {
+			subject: string; // To bude obsahovat správný předmět (dejepis nebo english)
 			unit: string;
 			markdown: string;
 			html: string;
@@ -13,7 +14,7 @@
 
 <section class="unit-notes">
 	<header class="unit-header">
-		<h1>Unit {data.unit} – Notes</h1>
+		<h1>{data.subject} – Unit {data.unit} – Notes</h1>
 		<p class="unit-subtitle">
 			Shrnuté zápisky z učebnice – slovní zásoba, gramatika a užitečné fráze.
 		</p>
