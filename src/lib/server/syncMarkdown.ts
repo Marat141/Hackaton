@@ -1,136 +1,169 @@
 import fs from 'fs';
-import path from 'path';
-import { glob } from 'glob';
+import * as path from 'path';
 import { db } from './db';
 import { markdownFiles } from './db/schema';
 import { eq } from 'drizzle-orm';
 
 export async function syncMarkdownToDB() {
-	const projectRoot = process.cwd();
-	const sourceDir = path.join(projectRoot, 'uploads/markdown');
-	const backupDir = path.join(projectRoot, 'backup/uploads/markdown');
+    const projectRoot = process.cwd();
+    
+    // CORRECT: Based on your earlier logs, files are here:
+    // uploads/markdown/english/Unit-1/unit-1-notes.md
+    const sourceDir = path.join(projectRoot, 'uploads/markdown');
+    const backupDir = path.join(projectRoot, 'backup/uploads/markdown');
 
-	console.log('📁 Project root:', projectRoot);
-	console.log('📁 Source directory:', sourceDir);
-	console.log('📁 Backup directory:', backupDir);
+    console.log('📁 Project root:', projectRoot);
+    console.log('📁 Source directory:', sourceDir);
+    console.log('📁 Backup directory:', backupDir);
 
-	// Create backup directory
-	if (!fs.existsSync(backupDir)) {
-		fs.mkdirSync(backupDir, { recursive: true });
-	}
+    // First, check if source directory exists
+    if (!fs.existsSync(sourceDir)) {
+        console.error(`❌ Source directory does not exist: ${sourceDir}`);
+        console.log('💡 Creating directory structure...');
+        
+        // Create the directory structure
+        fs.mkdirSync(sourceDir, { recursive: true });
+        
+        // Create example structure
+        const exampleDir = path.join(sourceDir, 'english/Unit-1');
+        fs.mkdirSync(exampleDir, { recursive: true });
+        
+        // Create example markdown file
+        const exampleFile = path.join(exampleDir, 'example.md');
+        fs.writeFileSync(exampleFile, '# Example Markdown\n\nThis is an example file.');
+        
+        console.log(`✅ Created example structure at: ${exampleFile}`);
+        console.log('👉 Please add your actual markdown files to:', sourceDir);
+        return;
+    }
 
-	// FIX 1: Use forward slashes for glob patterns, even on Windows
-	// Convert Windows path to forward slashes for glob
-	const sourceDirForGlob = sourceDir.replace(/\\/g, '/');
+    // Create backup directory
+    if (!fs.existsSync(backupDir)) {
+        fs.mkdirSync(backupDir, { recursive: true });
+    }
 
-	// FIX 2: Use proper glob pattern with forward slashes
-	const searchPattern = `${sourceDirForGlob}/**/*.md`;
-	console.log('🔍 Searching for files with pattern:', searchPattern);
+    // Find all .md files using simple recursive search (more reliable)
+    console.log('🔍 Searching for markdown files...');
+    const files = findAllMarkdownFiles(sourceDir);
+    console.log(`🔍 Found ${files.length} .md files`);
 
-	// FIX 3: Add Windows path handling options
-	const files = await glob(searchPattern, {
-		windowsPathsNoEscape: true, // Important for Windows
-		absolute: true // Get absolute paths
-	});
+    if (files.length === 0) {
+        console.log('📁 Listing directory contents:');
+        listDirectoryContents(sourceDir, 0);
+        return;
+    }
 
-	console.log(`🔍 Nalezeno ${files.length} .md souborů`);
-
-	// DEBUG: Manually find files if glob fails
-	if (files.length === 0) {
-		console.log('⚠️  Trying manual file search...');
-		const manualFiles = findAllMarkdownFiles(sourceDir);
-		console.log(`🔍 Manually found ${manualFiles.length} files`);
-
-		if (manualFiles.length > 0) {
-			await processFiles(manualFiles, sourceDir, backupDir);
-			return;
-		}
-
-		console.log('❌ No markdown files found!');
-		return;
-	}
-
-	await processFiles(files, sourceDir, backupDir);
-	console.log('✅ Hotovo! Markdown soubory jsou v databázi.');
+    await processFiles(files, sourceDir, backupDir);
+    console.log('✅ Hotovo! Markdown soubory jsou v databázi.');
 }
 
-// Helper function to manually find all markdown files
+// List directory contents with indentation
+function listDirectoryContents(dir: string, depth: number = 0) {
+    const indent = '  '.repeat(depth);
+    
+    try {
+        const items = fs.readdirSync(dir, { withFileTypes: true });
+        
+        for (const item of items) {
+            const fullPath = path.join(dir, item.name);
+            console.log(`${indent}${item.isDirectory() ? '📁' : '📄'} ${item.name}`);
+            
+            if (item.isDirectory()) {
+                listDirectoryContents(fullPath, depth + 1);
+            }
+        }
+    } catch (error) {
+        // FIX: Type the error properly
+        const err = error as Error;
+        console.log(`${indent}❌ Cannot read directory: ${err.message}`);
+    }
+}
+
+// Simple recursive file finder (more reliable than glob)
 function findAllMarkdownFiles(dir: string): string[] {
-	const files: string[] = [];
+    const files: string[] = [];
 
-	function traverse(currentDir: string) {
-		const items = fs.readdirSync(currentDir, { withFileTypes: true });
+    function traverse(currentDir: string) {
+        try {
+            const items = fs.readdirSync(currentDir, { withFileTypes: true });
 
-		for (const item of items) {
-			const fullPath = path.join(currentDir, item.name);
+            for (const item of items) {
+                const fullPath = path.join(currentDir, item.name);
 
-			if (item.isDirectory()) {
-				traverse(fullPath);
-			} else if (item.isFile() && item.name.endsWith('.md')) {
-				files.push(fullPath);
-			}
-		}
-	}
+                if (item.isDirectory()) {
+                    traverse(fullPath);
+                } else if (item.isFile() && item.name.toLowerCase().endsWith('.md')) {
+                    files.push(fullPath);
+                }
+            }
+        } catch (error) {
+            // FIX: Type the error properly
+            const err = error as Error;
+            console.error(`❌ Error reading directory ${currentDir}:`, err.message);
+        }
+    }
 
-	traverse(dir);
-	return files;
+    traverse(dir);
+    return files;
 }
 
 // Process files helper
 async function processFiles(files: string[], sourceDir: string, backupDir: string) {
-	for (const file of files) {
-		console.log('📄 Processing:', file);
+    for (const file of files) {
+        console.log('📄 Processing:', path.relative(sourceDir, file));
 
-		try {
-			const content = fs.readFileSync(file, 'utf-8');
-			const fileName = path.basename(file);
+        try {
+            const content = fs.readFileSync(file, 'utf-8');
+            const fileName = path.basename(file);
 
-			// Get relative path from source directory
-			const relativePath = path.relative(sourceDir, file);
-			const pathParts = relativePath.split(path.sep);
+            // Get relative path
+            const relativePath = path.relative(sourceDir, file);
+            const pathParts = relativePath.split(path.sep);
 
-			const subject = pathParts[0] || 'unknown';
-			const unit = pathParts[1] || 'unknown';
-			const fileIdentifier = relativePath.replace(/\\/g, '/');
+            const subject = pathParts[0] || 'unknown';
+            const unit = pathParts[1] || 'unknown';
+            const fileIdentifier = relativePath.replace(/\\/g, '/');
 
-			// Create backup
-			const backupSubjectDir = path.join(backupDir, subject, unit);
-			if (!fs.existsSync(backupSubjectDir)) {
-				fs.mkdirSync(backupSubjectDir, { recursive: true });
-			}
+            // Create backup
+            const backupSubjectDir = path.join(backupDir, subject, unit);
+            if (!fs.existsSync(backupSubjectDir)) {
+                fs.mkdirSync(backupSubjectDir, { recursive: true });
+            }
 
-			const backupFilePath = path.join(backupSubjectDir, fileName);
-			fs.writeFileSync(backupFilePath, content);
+            const backupFilePath = path.join(backupSubjectDir, fileName);
+            fs.writeFileSync(backupFilePath, content);
 
-			// Check if file exists in database
-			const exists = await db
-				.select()
-				.from(markdownFiles)
-				.where(eq(markdownFiles.file_path, fileIdentifier));
+            // Check if file exists in database
+            const exists = await db
+                .select()
+                .from(markdownFiles)
+                .where(eq(markdownFiles.file_path, fileIdentifier));
 
-			if (exists.length === 0) {
-				await db.insert(markdownFiles).values({
-					file_name: fileName,
-					file_path: fileIdentifier,
-					content: content,
-					subject: subject,
-					unit: unit,
-					full_path: `${subject}/${unit}`,
-					created_at: new Date().toISOString()
-				});
-				console.log(`🆕 INSERT: ${fileIdentifier}`);
-			} else {
-				await db
-					.update(markdownFiles)
-					.set({
-						content: content,
-						updated_at: new Date().toISOString()
-					})
-					.where(eq(markdownFiles.file_path, fileIdentifier));
-				console.log(`♻️ UPDATE: ${fileIdentifier}`);
-			}
-		} catch (error) {
-			console.error(`❌ Error processing ${file}:`, error);
-		}
-	}
+            if (exists.length === 0) {
+                await db.insert(markdownFiles).values({
+                    file_name: fileName,
+                    file_path: fileIdentifier,
+                    content: content,
+                    subject: subject,
+                    unit: unit,
+                    full_path: `${subject}/${unit}`,
+                    created_at: new Date().toISOString()
+                });
+                console.log(`🆕 INSERT: ${fileIdentifier}`);
+            } else {
+                await db
+                    .update(markdownFiles)
+                    .set({
+                        content: content,
+                        updated_at: new Date().toISOString()
+                    })
+                    .where(eq(markdownFiles.file_path, fileIdentifier));
+                console.log(`♻️ UPDATE: ${fileIdentifier}`);
+            }
+        } catch (error) {
+            // FIX: Type the error properly
+            const err = error as Error;
+            console.error(`❌ Error processing ${file}:`, err.message);
+        }
+    }
 }
