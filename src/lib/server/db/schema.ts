@@ -6,3 +6,10 @@ export const user = sqliteTable('user', {
 		.$defaultFn(() => crypto.randomUUID()),
 	age: integer('age')
 });
+
+export const markdownFiles = sqliteTable("markdown_files", {
+    id: integer("id").primaryKey(),
+    file_name: text("file_name").unique(),
+    content: text("content"),
+    created_at: text("created_at")
+});
