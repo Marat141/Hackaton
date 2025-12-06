@@ -1,32 +1,24 @@
 <script lang="ts">
-	interface Message {
-		role: 'user' | 'assistant';
-		content: string;
-	}
-
-	// Reaktivní stavové proměnné pomocí $state
+	// Reaktivní stavy
 	let isOpen = $state(false);
-	let messages = $state<Message[]>([
-		{
-			role: 'assistant',
-			content:
-				'Ahoj! Jsem AI asistent a pomůžu ti s učením. Máš nějakou otázku k učebnici nebo pracovnímu sešitu?'
-		}
-	]);
+	let messages = $state<{ role: string; content: string }[]>([]);
 	let inputMessage = $state('');
 	let isLoading = $state(false);
-	// svelte-ignore non_reactive_update
-		let chatContainer: HTMLDivElement | null = null;
+	let chatContainer = $state<HTMLDivElement | null>(null);
 
-	// Reaktivní inicializace pro první zprávu
+	// Přidej úvodní zprávu při prvním zobrazení
 	$effect(() => {
-		if (messages.length === 1 && messages[0].role === 'assistant') {
-			console.log('Chatbot je připraven k použití');
-		}
+		messages = [
+			{
+				role: 'assistant',
+				content:
+					'Ahoj! Jsem AI asistent a pomůžu ti s učením. Máš nějakou otázku k učebnici nebo pracovnímu sešitu?'
+			}
+		];
 	});
 
 	// Funkce pro odeslání zprávy
-	async function sendMessage(): Promise<void> {
+	async function sendMessage() {
 		if (!inputMessage.trim() || isLoading) return;
 
 		const userMessage = inputMessage.trim();
@@ -44,10 +36,13 @@
 		}, 100);
 
 		try {
-			const messagesToSend = messages.map((msg) => ({
-				role: msg.role,
-				content: msg.content
-			}));
+			// Získej pouze zprávy bez system message (ten se přidá na serveru)
+			const messagesToSend = messages
+				.filter((msg) => msg.role !== 'system')
+				.map((msg) => ({
+					role: msg.role,
+					content: msg.content
+				}));
 
 			const response = await fetch('/api/chat', {
 				method: 'POST',
@@ -64,28 +59,20 @@
 				throw new Error(errorMessage);
 			}
 
-			const data = (await response.json()) as { message: string };
+			const data = await response.json();
 			messages = [...messages, { role: 'assistant', content: data.message }];
-		} catch (error: any) {
+		} catch (error: unknown) {
 			console.error('Error sending message:', error);
 
 			let errorMessage = 'Omlouvám se, došlo k chybě. Zkuste to prosím znovu.';
 
-			if (error.message) {
-				if (
-					error.message.includes('OpenAI API key') ||
-					error.message.includes('Neplatný OpenAI API klíč')
-				) {
+			if (error instanceof Error) {
+				if (error.message.includes('API key') || error.message.includes('Neplatný API klíč')) {
 					errorMessage =
-						'⚠️ OpenAI API klíč není nastavený nebo je neplatný. Zkontrolujte prosím konfiguraci v .env souboru.';
-				} else if (
-					error.message.includes('quota') ||
-					error.message.includes('limit') ||
-					error.message.includes('billing')
-				) {
-					errorMessage =
-						'⚠️ Překročen limit OpenAI API. Zkontrolujte prosím svůj billing a quota na https://platform.openai.com/account/billing\n\n💡 Tip: Můžete přidat kredit na svůj OpenAI účet nebo počkat, dokud se limit neobnoví.';
-				} else if (error.message.includes('fetch') || error.message.includes('připojit')) {
+						'⚠️ API klíč není nastavený nebo je neplatný. Zkontrolujte prosím konfiguraci v .env souboru.';
+				} else if (error.message.includes('quota') || error.message.includes('limit')) {
+					errorMessage = '⚠️ Překročen limit API. Zkontrolujte prosím svůj billing a quota.';
+				} else if (error.message.includes('fetch')) {
 					errorMessage = '⚠️ Nelze se připojit k serveru. Zkontrolujte, zda server běží.';
 				} else {
 					errorMessage = `⚠️ ${error.message}`;
@@ -109,7 +96,6 @@
 		}
 	}
 
-	// Funkce pro detekci stisku klávesy
 	function handleKeyPress(event: KeyboardEvent): void {
 		if (event.key === 'Enter' && !event.shiftKey) {
 			event.preventDefault();
@@ -117,7 +103,6 @@
 		}
 	}
 
-	// Toggle pro otevření/zavření chatu
 	function toggleChat(): void {
 		isOpen = !isOpen;
 	}
@@ -125,6 +110,7 @@
 
 <div class="fixed bottom-4 right-4 z-50">
 	{#if isOpen}
+		<!-- Chat Window -->
 		<div class="bg-white rounded-lg shadow-2xl w-96 h-[600px] flex flex-col border border-gray-200">
 			<div class="bg-blue-600 text-white p-4 rounded-t-lg flex justify-between items-center">
 				<div>

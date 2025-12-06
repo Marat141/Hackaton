@@ -10,6 +10,8 @@
 	<link rel="icon" href={favicon} />
 </svelte:head>
 
-{@render children()}
+{#if children}
+	{@render children()}
+{/if}
 
 <Chatbot />
