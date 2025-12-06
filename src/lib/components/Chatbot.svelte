@@ -6,6 +6,16 @@
 	let isLoading = $state(false);
 	let chatContainer = $state<HTMLDivElement | null>(null);
 
+	// Aktuální unit a subject
+	let currentUnit = 'unit-1'; // Dynamicky nastavujeme
+	let currentSubject = 'english'; // Dynamicky nastavujeme
+
+	// Tlačítka pro generování promptů
+	let aiButtons = [
+		{ label: 'Udělej mi kvíz z tohoto Unit', action: 'quiz' },
+		{ label: 'Udělej mi shrnutí tohoto Unit', action: 'summary' }
+	];
+
 	// Přidej úvodní zprávu při prvním zobrazení
 	$effect(() => {
 		messages = [
@@ -36,7 +46,6 @@
 		}, 100);
 
 		try {
-			// Získej pouze zprávy bez system message (ten se přidá na serveru)
 			const messagesToSend = messages
 				.filter((msg) => msg.role !== 'system')
 				.map((msg) => ({
@@ -106,6 +115,64 @@
 	function toggleChat(): void {
 		isOpen = !isOpen;
 	}
+
+	// Funkce pro generování promptů
+	async function generatePrompt(action: string) {
+		try {
+			let content = '';
+			
+			// Nejprve zkusíme získat obsah z API
+			try {
+				content = await fetchUnitContent(currentUnit, currentSubject);
+			} catch (error) {
+				console.warn('API endpoint not found, using fallback content');
+				content = `Učivo z předmětu ${currentSubject}, unit ${currentUnit}. Pro podrobný obsah prosím nahrajte materiály.`;
+			}
+			
+			let prompt = '';
+
+			if (action === 'quiz') {
+				prompt = `Vytvoř kvíz pro ${currentSubject}, ${currentUnit}.${content ? ' Použij tento obsah: ' + content : ''} Kvíz měl mít 5-10 otázek různých typů (multiple choice, true/false, doplňování).`;
+			} else if (action === 'summary') {
+				prompt = `Vytvoř stručné shrnutí pro ${currentSubject}, ${currentUnit}.${content ? ' Obsah: ' + content : ''} Shrnutí by mělo obsahovat hlavní téma, klíčová slovíčka, gramatiku a praktické příklady.`;
+			}
+
+			// Nastavit prompt do vstupního pole
+			inputMessage = prompt;
+			
+			// Scroll na vstupní pole
+			setTimeout(() => {
+				const textarea = document.querySelector('textarea');
+				if (textarea) {
+					textarea.focus();
+				}
+			}, 50);
+			
+		} catch (error) {
+			console.error('Error generating prompt:', error);
+			inputMessage = `Vytvoř ${action === 'quiz' ? 'kvíz' : 'shrnutí'} pro ${currentSubject}, ${currentUnit}.`;
+		}
+	}
+
+	// Funkce pro získání obsahu pro konkrétní Unit a Subject
+	async function fetchUnitContent(unit: string, subject: string): Promise<string> {
+		try {
+			const response = await fetch(`/api/get-unit-content?subject=${subject}&unit=${unit}`);
+			
+			if (!response.ok) {
+				if (response.status === 404) {
+					throw new Error('API endpoint not found');
+				}
+				throw new Error(`HTTP error ${response.status}`);
+			}
+			
+			const data = await response.json();
+			return data.content?.slice(0, 500) || ''; // Vrátíme první 500 znaků pro prompt
+		} catch (error) {
+			console.error('Error fetching unit content:', error);
+			throw error;
+		}
+	}
 </script>
 
 <div class="fixed bottom-4 right-4 z-50">
@@ -119,7 +186,7 @@
 				</div>
 				<button
 					onclick={toggleChat}
-					class="text-white hover:text-gray-200 transition-colors p-1"
+					class="text-white hover:text-gray-200 transition-colors p-1 cursor-pointer"
 					aria-label="Zavřít chat"
 				>
 					<svg
@@ -139,6 +206,20 @@
 				</button>
 			</div>
 
+			<!-- Tlačítka pro AI prompt -->
+			<div class="p-4 border-t border-gray-200 bg-white">
+				{#each aiButtons as { label, action }}
+					<button
+						class="w-full bg-blue-600 text-white p-2 rounded-lg mb-2 hover:bg-blue-700 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+						onclick={() => generatePrompt(action)}
+						disabled={isLoading}
+					>
+						{label}
+					</button>
+				{/each}
+			</div>
+
+			<!-- Zprávy a chat -->
 			<div bind:this={chatContainer} class="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
 				{#each messages as message}
 					<div class="flex {message.role === 'user' ? 'justify-end' : 'justify-start'}">
@@ -171,20 +252,21 @@
 				{/if}
 			</div>
 
+			<!-- Vstupní pole -->
 			<div class="p-4 border-t border-gray-200 bg-white rounded-b-lg">
 				<div class="flex space-x-2">
 					<textarea
 						bind:value={inputMessage}
 						onkeypress={handleKeyPress}
 						placeholder="Napište svou otázku..."
-						class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+						class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-text"
 						rows="2"
 						disabled={isLoading}
 					></textarea>
 					<button
 						onclick={sendMessage}
 						disabled={isLoading || !inputMessage.trim()}
-						class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
+						class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center cursor-pointer"
 						aria-label="Odeslat zprávu"
 					>
 						<svg
@@ -208,7 +290,7 @@
 	{:else}
 		<button
 			onclick={toggleChat}
-			class="bg-blue-600 text-white rounded-full p-4 shadow-lg hover:bg-blue-700 transition-all hover:scale-110 active:scale-95"
+			class="bg-blue-600 text-white rounded-full p-4 shadow-lg hover:bg-blue-700 transition-all hover:scale-110 active:scale-95 cursor-pointer"
 			aria-label="Otevřít chat"
 		>
 			<svg
