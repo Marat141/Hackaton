@@ -2,7 +2,7 @@
   "cesky-jazyk": {
     "book-1": {
       "unit-1": { "pages": 5 },
-      "unit-2": { "pages": 5 }
+      "unit-2": { "pages": 2 }
     },
     "book-2": {
       "unit-1": { "pages": 5 },
@@ -21,7 +21,7 @@
   },
   "dejepis": {
     "book-1": {
-      "unit-1": { "pages": 5 },
+      "unit-1": { "pages": 11 },
       "unit-2": { "pages": 5 }
     },
     "book-2": {
@@ -41,8 +41,8 @@
   },
   "prirodopis": {
     "book-1": {
-      "unit-1": { "pages": 5 },
-      "unit-2": { "pages": 5 }
+      "unit-1": { "pages": 1 },
+      "unit-2": { "pages": 4 }
     },
     "book-2": {
       "unit-1": { "pages": 5 },
