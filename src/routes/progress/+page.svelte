@@ -1,7 +1,6 @@
 <script lang="ts">
 	import * as Sidebar from "$lib/components/ui/sidebar";
 	import AppSidebar from "$lib/components/app-sidebar.svelte";
-	import rocketIcon from "$lib/assets/rocket-icon.svg";
 	import starIcon from "$lib/assets/star-icon.svg";
 	import bookIcon from "$lib/assets/book-icon.svg";
 	import { onMount } from "svelte";
@@ -58,7 +57,6 @@
 			<div class="flex flex-wrap gap-6 justify-center">
 				<!-- Card 1: Days streak -->
 				<div class="w-[290px] h-[350px] bg-white border border-gray-200 rounded-lg shadow-sm p-6 flex flex-col items-center justify-center">
-					<img src={rocketIcon} alt="Rocket" class="w-32 h-32 mb-4" />
 					<h2 class="text-2xl font-semibold mb-1">{streak} {streak === 1 ? 'den' : streak < 5 ? 'dny' : 'dní'} v řadě</h2>
 					<p class="text-sm text-gray-500">-jen tak dál!!</p>
 				</div>
