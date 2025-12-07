@@ -1,6 +1,8 @@
 <script lang="ts">
 //src\lib\components\Chatbot.svelte
 
+import { page } from '$app/stores';
+
 	// Reaktivní stavy
 	let isOpen = $state(false);
 	let messages = $state<{ role: string; content: string }[]>([]);
@@ -10,25 +12,66 @@
 	let generatingPrompt = $state<string | null>(null);
 	let showQuickActions = $state(true); // Nový stav pro zobrazení/skrytí rychlých akcí
 
-	// Aktuální unit a subject
+	// Aktuální unit a subject - nyní budou reaktivně získány z URL
 	let currentUnit = $state('unit-1');
 	let currentSubject = $state('english');
+
+	// Dynamické načítání hodnot z URL
+	$effect(() => {
+		const params = $page.params;
+		
+		// Získání předmětu z URL (např. /dejepis/unit-1 → subject = "dejepis")
+		if (params.subject) {
+			// Normalizace hodnoty - převedení na lowercase a mapování na interní hodnoty
+			const subjectParam = params.subject.toLowerCase();
+			
+			// Mapování českých názvů na interní hodnoty
+			const subjectMap: Record<string, string> = {
+				'dejepis': 'history',
+				'anglictina': 'english',
+				'english': 'english',
+				'matematika': 'math',
+				'math': 'math',
+				'biologie': 'biology',
+				'biology': 'biology',
+				'fyzika': 'physics',
+				'physics': 'physics',
+				'chemie': 'chemistry',
+				'chemistry': 'chemistry'
+			};
+			
+			currentSubject = subjectMap[subjectParam] || 'english';
+		}
+		
+		// Získání unit z URL (např. /dejepis/unit-3 → unit = "unit-3")
+		if (params.unit) {
+			// Normalizace - zajistíme formát "unit-X"
+			const unitParam = params.unit.toLowerCase();
+			if (unitParam.startsWith('unit-')) {
+				currentUnit = unitParam;
+			} else if (/^\d+$/.test(unitParam)) {
+				currentUnit = `unit-${unitParam}`;
+			}
+		}
+		
+		// Pro ladění - zobrazit aktuální hodnoty v konzoli
+		console.log('URL params:', params);
+		console.log('Current subject:', currentSubject);
+		console.log('Current unit:', currentUnit);
+	});
 
 	// Dostupné předměty a unity
 	const availableSubjects = [
 		{ value: 'english', label: 'Angličtina' },
 		{ value: 'math', label: 'Matematika' },
-		{ value: 'biology', label: 'Biologie' },
 		{ value: 'history', label: 'Dějepis' },
-		{ value: 'physics', label: 'Fyzika' },
-		{ value: 'chemistry', label: 'Chemie' }
 	];
 
 	const availableUnits = Array.from({ length: 12 }, (_, i) => `unit-${i + 1}`);
 
-	// Tlačítka pro generování promptů
+	// Tlačítka pro generování promptů - AKTUALIZOVÁNO
 	const aiButtons = [
-		{ label: 'Udělej mi kvíz z tohoto Unit', action: 'quiz', shortcut: 'Ctrl+1' },
+		{ label: 'Udělej mi kvíz z aktuálních zápisků', action: 'quiz', shortcut: 'Ctrl+1' },
 		{ label: 'Udělej mi shrnutí tohoto Unit', action: 'summary', shortcut: 'Ctrl+2' },
 		{ label: 'Vysvětli to jako učitel', action: 'explain', shortcut: 'Ctrl+3' },
 		{ label: 'Dej mi příklady k procvičení', action: 'practice', shortcut: 'Ctrl+4' }
@@ -40,7 +83,7 @@
 			{
 				role: 'assistant',
 				content:
-					'Ahoj! Jsem AI asistent a pomůžu ti s učením. Můžeš použít jedno z rychlých tlačítek nebo mi napsat vlastní otázku!'
+					'Ahoj! Jsem AI asistent a pomůžu ti s učením. Můžeš použít jedno z rychlých tlačítek pro práci s aktuálními zápisky nebo mi napsat vlastní otázku!'
 			}
 		];
 	});
@@ -216,7 +259,7 @@
 		showQuickActions = !showQuickActions;
 	}
 
-	// Funkce pro generování promptů
+	// Funkce pro generování promptů - AKTUALIZOVÁNO
 	async function generatePrompt(action: string) {
 		generatingPrompt = action;
 
@@ -238,18 +281,15 @@
 			}
 
 			let prompt = '';
-			const subjectName =
-				availableSubjects.find((s) => s.value === currentSubject)?.label || currentSubject;
-			const unitNumber = currentUnit.replace('unit-', '');
 
 			if (action === 'quiz') {
-				prompt = `Vytvoř interaktivní kvíz pro ${subjectName}, Unit ${unitNumber}.${content ? ' Použij tento obsah: ' + content : ''} \n\nKvíz by měl mít 5-10 otázek různých typů (multiple choice, true/false, doplňování, párování). Ke každé otázce přidej správnou odpověď a vysvětlení. Formátuj jako: 1. Otázka... A) Možnost A B) Možnost B C) Možnost D Správně: B - Vysvětlení...`;
+				prompt = `Vytvoř interaktivní kvíz pro aktuální zápisky/unit. \n\nKvíz by měl mít 5-10 otázek různých typů (multiple choice, true/false, doplňování, párování). Ke každé otázce přidej správnou odpověď a vysvětlení. Formátuj jako: 1. Otázka... A) Možnost A B) Možnost B C) Možnost D Správně: B - Vysvětlení...`;
 			} else if (action === 'summary') {
-				prompt = `Vytvoř stručné a přehledné shrnutí pro ${subjectName}, Unit ${unitNumber}.${content ? ' Obsah: ' + content : ''} \n\nShrň hlavní téma, klíčová slovíčka/pojmy, důležité vzorce/pravidla, praktické příklady a tipy na zapamatování. Formátuj pomocí nadpisů a odrážek pro lepší čitelnost.`;
+				prompt = `Vytvoř stručné a přehledné shrnutí pro aktuální zápisky/unit. \n\nShrň hlavní téma, klíčová slovíčka/pojmy, důležité vzorce/pravidla, praktické příklady a tipy na zapamatování. Formátuj pomocí nadpisů a odrážek pro lepší čitelnost.`;
 			} else if (action === 'explain') {
-				prompt = `Vysvětli učivo z ${subjectName}, Unit ${unitNumber} jako zkušený učitel.${content ? ' Toto je obsah: ' + content : ''} \n\nVysvětli postupně, jednoduše, s analogiemi a příklady z reálného života. Začni základními pojmy a postupně přejdi ke složitějším. Používej přátelský a povzbuzující tón.`;
+				prompt = `Vysvětli učivo z aktuálního zápisku/unit jako zkušený učitel. \n\nVysvětli postupně, jednoduše, s analogiemi a příklady z reálného života. Začni základními pojmy a postupně přejdi ke složitějším. Používej přátelský a povzbuzující tón.`;
 			} else if (action === 'practice') {
-				prompt = `Vytvoř sadu příkladů k procvičení pro ${subjectName}, Unit ${unitNumber}.${content ? ' Téma: ' + content : ''} \n\nVytvoř 5-8 příkladů s postupným řešením od jednoduchých ke složitým. U každého příkladu uveď: 1) Zadání 2) Krok za krokem řešení 3) Tipy a triky 4) Odpověď.`;
+				prompt = `Vytvoř sadu příkladů k procvičení pro aktuální zápisky/unit. \n\nVytvoř 5-8 příkladů s postupným řešením od jednoduchých ke složitým. U každého příkladu uveď: 1) Zadání 2) Krok za krokem řešení 3) Tipy a triky 4) Odpověď.`;
 			}
 
 			// Nastavit prompt do vstupního pole
@@ -265,7 +305,7 @@
 			}, 50);
 		} catch (error) {
 			console.error('Error generating prompt:', error);
-			inputMessage = `Vytvoř ${action === 'quiz' ? 'kvíz' : action === 'summary' ? 'shrnutí' : action === 'explain' ? 'vysvětlení' : 'příklady'} pro ${currentSubject}, ${currentUnit}.`;
+			inputMessage = `Vytvoř ${action === 'quiz' ? 'kvíz' : action === 'summary' ? 'shrnutí' : action === 'explain' ? 'vysvětlení' : 'příklady'} pro aktuální zápisky.`;
 		} finally {
 			setTimeout(() => {
 				generatingPrompt = null;
@@ -284,7 +324,7 @@
 			>
 				<div>
 					<h3 class="font-semibold text-lg">AI Asistent</h3>
-					<p class="text-xs text-blue-100">Pomoc s učením</p>
+					<p class="text-xs text-blue-100">Pomoc s aktuálními zápisky</p>
 				</div>
 				<div class="flex space-x-1">
 					<!-- Tlačítko pro skrytí/zobrazení rychlých akcí -->
@@ -355,7 +395,7 @@
 			{#if showQuickActions}
 				<div class="p-4 border-b border-gray-200 bg-white">
 					<div class="flex justify-between items-center mb-2">
-						<h4 class="text-sm font-semibold text-gray-700">Rychlé akce:</h4>
+						<h4 class="text-sm font-semibold text-gray-700">Rychlé akce pro zápisky:</h4>
 						<button
 							onclick={toggleQuickActions}
 							class="text-xs text-gray-500 hover:text-gray-700 flex items-center"
