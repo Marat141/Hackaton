@@ -45,6 +45,7 @@
 	},
 	"dependencies": {
 		"@google/genai": "^1.31.0",
+		"@sveltejs/adapter-vercel": "^6.2.0",
 		"bits-ui": "^2.14.4",
 		"clsx": "^2.1.1",
 		"d3-scale": "^4.0.2",
