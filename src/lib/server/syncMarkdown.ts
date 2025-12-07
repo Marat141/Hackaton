@@ -8,29 +8,28 @@ import { eq } from 'drizzle-orm';
 export async function syncMarkdownToDB() {
     const projectRoot = process.cwd();
     
-    // CORRECT: Based on your earlier logs, files are here:
-    // uploads/markdown/english/Unit-1/unit-1-notes.md
-    const sourceDir = path.join(projectRoot, 'uploads/markdown');
-    const backupDir = path.join(projectRoot, 'backup/uploads/markdown');
+    // Vytvoření cesty k souborům ve static
+    const sourceDir = path.join(projectRoot, 'static', 'books');
+    const backupDir = path.join(projectRoot, 'backup', 'static', 'books');
 
     console.log('📁 Project root:', projectRoot);
     console.log('📁 Source directory:', sourceDir);
     console.log('📁 Backup directory:', backupDir);
 
-    // First, check if source directory exists
+    // Nejprve zkontrolujeme, zda zdrojový adresář existuje
     if (!fs.existsSync(sourceDir)) {
         console.error(`❌ Source directory does not exist: ${sourceDir}`);
         console.log('💡 Creating directory structure...');
         
-        // Create the directory structure
+        // Vytvoření adresářové struktury
         fs.mkdirSync(sourceDir, { recursive: true });
         
-        // Create example structure
-        const exampleDir = path.join(sourceDir, 'english/Unit-1');
+        // Vytvoření příkladové struktury
+        const exampleDir = path.join(sourceDir, 'english', 'Unit-1');
         fs.mkdirSync(exampleDir, { recursive: true });
         
-        // Create example markdown file
-        const exampleFile = path.join(exampleDir, 'example.md');
+        // Vytvoření příkladového markdown souboru
+        const exampleFile = path.join(exampleDir, 'unit-1-english-notes.md');
         fs.writeFileSync(exampleFile, '# Example Markdown\n\nThis is an example file.');
         
         console.log(`✅ Created example structure at: ${exampleFile}`);
@@ -38,12 +37,12 @@ export async function syncMarkdownToDB() {
         return;
     }
 
-    // Create backup directory
+    // Vytvoření záložního adresáře
     if (!fs.existsSync(backupDir)) {
         fs.mkdirSync(backupDir, { recursive: true });
     }
 
-    // Find all .md files using simple recursive search (more reliable)
+    // Hledání všech .md souborů pomocí rekurzivního hledání
     console.log('🔍 Searching for markdown files...');
     const files = findAllMarkdownFiles(sourceDir);
     console.log(`🔍 Found ${files.length} .md files`);
@@ -74,13 +73,12 @@ function listDirectoryContents(dir: string, depth: number = 0) {
             }
         }
     } catch (error) {
-        // FIX: Type the error properly
         const err = error as Error;
         console.log(`${indent}❌ Cannot read directory: ${err.message}`);
     }
 }
 
-// Simple recursive file finder (more reliable than glob)
+// Simple recursive file finder
 function findAllMarkdownFiles(dir: string): string[] {
     const files: string[] = [];
 
@@ -98,7 +96,6 @@ function findAllMarkdownFiles(dir: string): string[] {
                 }
             }
         } catch (error) {
-            // FIX: Type the error properly
             const err = error as Error;
             console.error(`❌ Error reading directory ${currentDir}:`, err.message);
         }
@@ -162,7 +159,6 @@ async function processFiles(files: string[], sourceDir: string, backupDir: strin
                 console.log(`♻️ UPDATE: ${fileIdentifier}`);
             }
         } catch (error) {
-            // FIX: Type the error properly
             const err = error as Error;
             console.error(`❌ Error processing ${file}:`, err.message);
         }
