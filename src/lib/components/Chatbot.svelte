@@ -3,9 +3,32 @@
 
 import { page } from '$app/stores';
 
+	// Props for embedding mode
+	let { 
+		embedded = false,
+		onNotesGenerated
+	}: { 
+		embedded?: boolean;
+		onNotesGenerated?: (content: string) => void;
+	} = $props();
+
+	// Active tool state
+	type ToolType = 'chatbot' | 'vypisky' | 'kviz' | 'karty';
+	let activeTool = $state<ToolType>('chatbot');
+
+	// Separate messages for each tool
+	let toolMessages = $state<Record<ToolType, { role: string; content: string }[]>>({
+		chatbot: [],
+		vypisky: [],
+		kviz: [],
+		karty: []
+	});
+
+	// Reactive messages based on active tool
+	let messages = $derived(toolMessages[activeTool]);
+
 	// Reaktivní stavy
 	let isOpen = $state(false);
-	let messages = $state<{ role: string; content: string }[]>([]);
 	let inputMessage = $state('');
 	let isLoading = $state(false);
 	let chatContainer = $state<HTMLDivElement | null>(null);
@@ -20,37 +43,30 @@ import { page } from '$app/stores';
 	$effect(() => {
 		const params = $page.params;
 		
-		// Získání předmětu z URL (např. /dejepis/unit-1 → subject = "dejepis")
-		if (params.subject) {
-			// Normalizace hodnoty - převedení na lowercase a mapování na interní hodnoty
-			const subjectParam = params.subject.toLowerCase();
-			
-			// Mapování českých názvů na interní hodnoty
-			const subjectMap: Record<string, string> = {
-				'dejepis': 'history',
-				'anglictina': 'english',
-				'english': 'english',
-				'matematika': 'math',
-				'math': 'math',
-				'biologie': 'biology',
-				'biology': 'biology',
-				'fyzika': 'physics',
-				'physics': 'physics',
-				'chemie': 'chemistry',
-				'chemistry': 'chemistry'
-			};
-			
-			currentSubject = subjectMap[subjectParam] || 'english';
+		// Získání předmětu z URL - podporuje více URL struktur
+		// 1. /summary/{subjectId}/{bookId}/{unitId} → params.subjectId
+		// 2. /{subject}/unit/{unit} → params.subject
+		const subjectParam = (params.subjectId || params.subject || '');
+		
+		if (subjectParam) {
+			// Keep the original subject name as it appears in the URL
+			// (dejepis, cesky-jazyk, anglicky-jazyk, zemepis, prirodopis)
+			currentSubject = subjectParam;
 		}
 		
-		// Získání unit z URL (např. /dejepis/unit-3 → unit = "unit-3")
-		if (params.unit) {
+		// Získání unit z URL - podporuje více URL struktur
+		// 1. /summary/{subjectId}/{bookId}/{unitId} → params.unitId
+		// 2. /{subject}/unit/{unit} → params.unit
+		const unitParam = (params.unitId || params.unit || '').toLowerCase();
+		
+		if (unitParam) {
 			// Normalizace - zajistíme formát "unit-X"
-			const unitParam = params.unit.toLowerCase();
 			if (unitParam.startsWith('unit-')) {
 				currentUnit = unitParam;
 			} else if (/^\d+$/.test(unitParam)) {
 				currentUnit = `unit-${unitParam}`;
+			} else {
+				currentUnit = unitParam;
 			}
 		}
 		
@@ -77,15 +93,27 @@ import { page } from '$app/stores';
 		{ label: 'Dej mi příklady k procvičení', action: 'practice', shortcut: 'Ctrl+4' }
 	];
 
-	// Přidej úvodní zprávu při prvním zobrazení
+	// Initialize welcome messages for each tool
 	$effect(() => {
-		messages = [
-			{
-				role: 'assistant',
-				content:
-					'Ahoj! Jsem AI asistent a pomůžu ti s učením. Můžeš použít jedno z rychlých tlačítek pro práci s aktuálními zápisky nebo mi napsat vlastní otázku!'
+		const welcomeMessages: Record<ToolType, string> = {
+			chatbot: 'Ahoj! Jsem AI asistent a pomůžu ti s učením. Můžeš mi napsat jakoukoliv otázku!',
+			vypisky: 'Vítej v sekci Výpisků! Zde ti pomohu s tvými poznámkami a výpisky z jednotlivých lekcí.',
+			kviz: 'Vítej v sekci Kvízů! Pomohu ti vytvořit a procvičit kvízy k aktuálnímu učivu.',
+			karty: 'Vítej v sekci Karet! Zde si můžeš vytvořit flashcards pro efektivní učení.'
+		};
+
+		// Initialize messages for tools that don't have any
+		Object.keys(welcomeMessages).forEach((tool) => {
+			const toolKey = tool as ToolType;
+			if (toolMessages[toolKey].length === 0) {
+				toolMessages[toolKey] = [
+					{
+						role: 'assistant',
+						content: welcomeMessages[toolKey]
+					}
+				];
 			}
-		];
+		});
 	});
 
 	// Klávesové zkratky
@@ -134,20 +162,46 @@ import { page } from '$app/stores';
 		const userMessage = inputMessage.trim();
 		inputMessage = '';
 
-		// Přidej uživatelskou zprávu
-		messages = [...messages, { role: 'user', content: userMessage }];
+		// Přidej uživatelskou zprávu do aktuálního nástroje
+		toolMessages[activeTool] = [...toolMessages[activeTool], { role: 'user', content: userMessage }];
 		isLoading = true;
 
 		// Scroll na konec
 		scrollToBottom();
 
 		try {
-			const messagesToSend = messages
+			// Fetch markdown content if we're in certain tools that need it
+			let contextContent = '';
+			if (activeTool === 'vypisky' || activeTool === 'kviz' || activeTool === 'karty') {
+				try {
+					const apiUrl = `/api/get-unit-content?subject=${currentSubject}&unit=${currentUnit}`;
+					console.log('Fetching content for context:', apiUrl);
+					
+					const contentResponse = await fetch(apiUrl);
+					if (contentResponse.ok) {
+						const contentData = await contentResponse.json();
+						contextContent = contentData.content || '';
+						console.log('Loaded content:', contextContent.substring(0, 200) + '...');
+					}
+				} catch (error) {
+					console.warn('Could not load content for context:', error);
+				}
+			}
+
+			const messagesToSend = toolMessages[activeTool]
 				.filter((msg) => msg.role !== 'system')
 				.map((msg) => ({
 					role: msg.role,
 					content: msg.content
 				}));
+
+			// If we have context content, prepend it as a system message
+			if (contextContent) {
+				messagesToSend.unshift({
+					role: 'system',
+					content: `You are working with the following course material:\n\nSubject: ${currentSubject}\nUnit: ${currentUnit}\n\nContent:\n${contextContent}\n\nUse this content to answer the user's questions accurately.`
+				});
+			}
 
 			const response = await fetch('/api/chat', {
 				method: 'POST',
@@ -165,7 +219,12 @@ import { page } from '$app/stores';
 			}
 
 			const data = await response.json();
-			messages = [...messages, { role: 'assistant', content: data.message }];
+			toolMessages[activeTool] = [...toolMessages[activeTool], { role: 'assistant', content: data.message }];
+
+			// If we're in Výpisky mode and callback exists, trigger the notes modal
+			if (activeTool === 'vypisky' && onNotesGenerated) {
+				onNotesGenerated(data.message);
+			}
 
 			// Přidej tip pro další použití
 			showTip();
@@ -187,8 +246,8 @@ import { page } from '$app/stores';
 				}
 			}
 
-			messages = [
-				...messages,
+			toolMessages[activeTool] = [
+				...toolMessages[activeTool],
 				{
 					role: 'assistant',
 					content: errorMessage
@@ -219,11 +278,11 @@ import { page } from '$app/stores';
 		];
 
 		// Přidej tip náhodně (25% šance)
-		if (Math.random() < 0.25 && messages.length > 4) {
+		if (Math.random() < 0.25 && toolMessages[activeTool].length > 4) {
 			const randomTip = tips[Math.floor(Math.random() * tips.length)];
 			setTimeout(() => {
-				messages = [
-					...messages,
+				toolMessages[activeTool] = [
+					...toolMessages[activeTool],
 					{
 						role: 'assistant',
 						content: randomTip
@@ -232,6 +291,12 @@ import { page } from '$app/stores';
 				scrollToBottom();
 			}, 1000);
 		}
+	}
+
+	// Function to switch between tools
+	function switchTool(tool: ToolType) {
+		activeTool = tool;
+		scrollToBottom();
 	}
 
 	function handleKeyPress(event: KeyboardEvent): void {
@@ -268,28 +333,36 @@ import { page } from '$app/stores';
 
 			// Nejprve zkusíme získat obsah z API
 			try {
-				const response = await fetch(
-					`/api/get-unit-content?subject=${currentSubject}&unit=${currentUnit}`
-				);
+				const apiUrl = `/api/get-unit-content?subject=${currentSubject}&unit=${currentUnit}`;
+				console.log('Fetching content from:', apiUrl);
+				
+				const response = await fetch(apiUrl);
 
 				if (response.ok) {
 					const data = await response.json();
+					console.log('API response:', data);
 					content = data.content?.slice(0, 500) || '';
+				} else {
+					console.warn('API returned error:', response.status);
 				}
 			} catch (error) {
-				console.warn('API endpoint not found, using fallback content');
+				console.warn('API endpoint error:', error);
 			}
+
+			// Vytvoř kontext se specifickým předmětem a jednotkou
+			const contextInfo = `Předmět: ${currentSubject}, Unit: ${currentUnit}`;
+			const contentPrefix = content ? `\n\nObsah zápisků:\n${content}\n\n` : '\n\n';
 
 			let prompt = '';
 
 			if (action === 'quiz') {
-				prompt = `Vytvoř interaktivní kvíz pro aktuální zápisky/unit. \n\nKvíz by měl mít 5-10 otázek různých typů (multiple choice, true/false, doplňování, párování). Ke každé otázce přidej správnou odpověď a vysvětlení. Formátuj jako: 1. Otázka... A) Možnost A B) Možnost B C) Možnost D Správně: B - Vysvětlení...`;
+				prompt = `Vytvoř interaktivní kvíz pro ${contextInfo}.${contentPrefix}Kvíz by měl mít 5-10 otázek různých typů (multiple choice, true/false, doplňování, párování). Ke každé otázce přidej správnou odpověď a vysvětlení. Formátuj jako: 1. Otázka... A) Možnost A B) Možnost B C) Možnost D Správně: B - Vysvětlení...`;
 			} else if (action === 'summary') {
-				prompt = `Vytvoř stručné a přehledné shrnutí pro aktuální zápisky/unit. \n\nShrň hlavní téma, klíčová slovíčka/pojmy, důležité vzorce/pravidla, praktické příklady a tipy na zapamatování. Formátuj pomocí nadpisů a odrážek pro lepší čitelnost.`;
+				prompt = `Vytvoř stručné a přehledné shrnutí pro ${contextInfo}.${contentPrefix}Shrň hlavní téma, klíčová slovíčka/pojmy, důležité vzorce/pravidla, praktické příklady a tipy na zapamatování. Formátuj pomocí nadpisů a odrážek pro lepší čitelnost.`;
 			} else if (action === 'explain') {
-				prompt = `Vysvětli učivo z aktuálního zápisku/unit jako zkušený učitel. \n\nVysvětli postupně, jednoduše, s analogiemi a příklady z reálného života. Začni základními pojmy a postupně přejdi ke složitějším. Používej přátelský a povzbuzující tón.`;
+				prompt = `Vysvětli učivo z ${contextInfo} jako zkušený učitel.${contentPrefix}Vysvětli postupně, jednoduše, s analogiemi a příklady z reálného života. Začni základními pojmy a postupně přejdi ke složitějším. Používej přátelský a povzbuzující tón.`;
 			} else if (action === 'practice') {
-				prompt = `Vytvoř sadu příkladů k procvičení pro aktuální zápisky/unit. \n\nVytvoř 5-8 příkladů s postupným řešením od jednoduchých ke složitým. U každého příkladu uveď: 1) Zadání 2) Krok za krokem řešení 3) Tipy a triky 4) Odpověď.`;
+				prompt = `Vytvoř sadu příkladů k procvičení pro ${contextInfo}.${contentPrefix}Vytvoř 5-8 příkladů s postupným řešením od jednoduchých ke složitým. U každého příkladu uveď: 1) Zadání 2) Krok za krokem řešení 3) Tipy a triky 4) Odpověď.`;
 			}
 
 			// Nastavit prompt do vstupního pole
@@ -314,10 +387,10 @@ import { page } from '$app/stores';
 	}
 </script>
 
-<div class="fixed bottom-4 right-4 z-50">
-	{#if isOpen}
+<div class="{embedded ? 'w-full h-full' : 'fixed bottom-4 right-4 z-50'}">
+	{#if isOpen || embedded}
 		<!-- Chat Window -->
-		<div class="bg-white rounded-lg shadow-2xl w-96 h-[600px] flex flex-col border border-gray-200">
+		<div class="bg-white rounded-lg shadow-2xl {embedded ? 'w-full h-full' : 'w-96 h-[600px]'} flex flex-col border border-gray-200">
 			<!-- Header s tlačítkem pro skrytí rychlých akcí -->
 			<div
 				class="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4 rounded-t-lg flex justify-between items-center"
@@ -366,33 +439,82 @@ import { page } from '$app/stores';
 							</svg>
 						{/if}
 					</button>
-					<!-- Tlačítko pro zavření chatu -->
-					<button
-						onclick={toggleChat}
-						class="text-white hover:text-gray-200 transition-colors p-1 cursor-pointer rounded-full hover:bg-blue-800"
-						aria-label="Zavřít chat"
-						title="Zavřít (Esc)"
-					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							class="h-5 w-5"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke="currentColor"
+					<!-- Tlačítko pro zavření chatu (hide if embedded) -->
+					{#if !embedded}
+						<button
+							onclick={toggleChat}
+							class="text-white hover:text-gray-200 transition-colors p-1 cursor-pointer rounded-full hover:bg-blue-800"
+							aria-label="Zavřít chat"
+							title="Zavřít (Esc)"
 						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M6 18L18 6M6 6l12 12"
-							/>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								class="h-5 w-5"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke="currentColor"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M6 18L18 6M6 6l12 12"
+								/>
+							</svg>
+						</button>
+					{/if}
+				</div>
+			</div>
+
+			<!-- Navigation Buttons -->
+			<div class="p-2 border-b border-gray-200 bg-gray-50">
+				<div class="grid grid-cols-4 gap-1.5">
+					<button
+						onclick={() => switchTool('chatbot')}
+						class="flex flex-row items-center justify-center gap-1.5 py-2 px-2 {activeTool === 'chatbot' ? 'bg-blue-100 border-blue-500' : 'bg-white hover:bg-blue-50'} border border-gray-200 rounded-lg transition-colors cursor-pointer"
+						title="Chat Bot"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 {activeTool === 'chatbot' ? 'text-blue-700' : 'text-blue-600'}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
 						</svg>
+						<span class="text-xs font-medium {activeTool === 'chatbot' ? 'text-blue-700' : 'text-gray-700'}">Chat Bot</span>
+					</button>
+					<button
+						onclick={() => switchTool('vypisky')}
+						class="flex flex-row items-center justify-center gap-1.5 py-2 px-2 {activeTool === 'vypisky' ? 'bg-blue-100 border-blue-500' : 'bg-white hover:bg-blue-50'} border border-gray-200 rounded-lg transition-colors cursor-pointer"
+						title="Výpisky"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 {activeTool === 'vypisky' ? 'text-blue-700' : 'text-blue-600'}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+						</svg>
+						<span class="text-xs font-medium {activeTool === 'vypisky' ? 'text-blue-700' : 'text-gray-700'}">Výpisky</span>
+					</button>
+					<button
+						onclick={() => switchTool('kviz')}
+						class="flex flex-row items-center justify-center gap-1.5 py-2 px-2 {activeTool === 'kviz' ? 'bg-blue-100 border-blue-500' : 'bg-white hover:bg-blue-50'} border border-gray-200 rounded-lg transition-colors cursor-pointer"
+						title="Kvíz"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 {activeTool === 'kviz' ? 'text-blue-700' : 'text-blue-600'}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+						</svg>
+						<span class="text-xs font-medium {activeTool === 'kviz' ? 'text-blue-700' : 'text-gray-700'}">Kvíz</span>
+					</button>
+					<button
+						onclick={() => switchTool('karty')}
+						class="flex flex-row items-center justify-center gap-1.5 py-2 px-2 {activeTool === 'karty' ? 'bg-blue-100 border-blue-500' : 'bg-white hover:bg-blue-50'} border border-gray-200 rounded-lg transition-colors cursor-pointer"
+						title="Karty"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 {activeTool === 'karty' ? 'text-blue-700' : 'text-blue-600'}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+						</svg>
+						<span class="text-xs font-medium {activeTool === 'karty' ? 'text-blue-700' : 'text-gray-700'}">Karty</span>
 					</button>
 				</div>
 			</div>
 
 			<!-- Rychlá AI tlačítka - Nyní lze skrýt/zobrazit -->
-			{#if showQuickActions}
+			<!-- TEMPORARILY HIDDEN - UNCOMMENT TO RESTORE -->
+			{#if false && showQuickActions}
 				<div class="p-4 border-b border-gray-200 bg-white">
 					<div class="flex justify-between items-center mb-2">
 						<h4 class="text-sm font-semibold text-gray-700">Rychlé akce pro zápisky:</h4>
@@ -463,7 +585,8 @@ import { page } from '$app/stores';
 						💡 Použij klávesové zkratky: Ctrl+1 až Ctrl+4
 					</p>
 				</div>
-			{:else}
+			<!-- TEMPORARILY HIDDEN - UNCOMMENT TO RESTORE -->
+			{:else if false}
 				<!-- Tlačítko pro zobrazení rychlých akcí když jsou skryté -->
 				<div class="p-2 border-b border-gray-200 bg-gray-50 text-center">
 					<button
@@ -635,8 +758,8 @@ import { page } from '$app/stores';
 				</div>
 			</div>
 		</div>
-	{:else}
-		<!-- Floating chat button -->
+	{:else if !embedded}
+		<!-- Floating chat button (only show if not embedded) -->
 		<button
 			onclick={toggleChat}
 			class="bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-full p-4 shadow-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-300 hover:scale-110 active:scale-95 cursor-pointer group animate-bounce-slow"

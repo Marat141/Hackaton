@@ -13,8 +13,17 @@ export const GET: RequestHandler = async ({ url }) => {
     }
 
     try {
+        // Normalize unit format: unit-1 -> Unit-1, unit-2 -> Unit-2
+        const normalizedUnit = unit.replace(/^unit-/i, 'Unit-');
+        
+        // Debug logging
+        console.log('API Request:', { subject, unit, normalizedUnit });
+        
         // Získání skutečného obsahu z databáze
-        const notes = await getNotesByUnit(subject, `Unit-${unit}`);
+        // Keep subject as is (e.g., "dejepis", "cesky-jazyk")
+        const notes = await getNotesByUnit(subject, normalizedUnit);
+        
+        console.log('Database results:', notes.length, 'notes found');
         
         if (notes.length === 0) {
             return json({
