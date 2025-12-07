@@ -1,8 +1,6 @@
 <script lang="ts">
 	import * as Sidebar from "$lib/components/ui/sidebar";
 	import AppSidebar from "$lib/components/app-sidebar.svelte";
-	import starIcon from "$lib/assets/star-icon.svg";
-	import bookIcon from "$lib/assets/book-icon.svg";
 	import { onMount } from "svelte";
 
 	let streak = $state(0);
@@ -63,7 +61,6 @@
 				
 				<!-- Card 2: Level -->
 				<div class="w-[290px] h-[350px] bg-white border border-gray-200 rounded-lg shadow-sm p-6 flex flex-col items-center justify-center">
-					<img src={starIcon} alt="Star" class="w-32 h-32 mb-4" />
 					<h2 class="text-2xl font-semibold mb-2">Lvl 120</h2>
 					<div class="w-full bg-gray-200 rounded-full h-2 mb-1">
 						<div class="bg-blue-500 h-2 rounded-full" style="width: 70%"></div>
@@ -73,7 +70,6 @@
 				
 				<!-- Card 3: Books completed -->
 				<div class="w-[290px] h-[350px] bg-white border border-gray-200 rounded-lg shadow-sm p-6 flex flex-col items-center justify-center">
-					<img src={bookIcon} alt="Book" class="w-32 h-32 mb-4" />
 					<h2 class="text-4xl font-bold mb-1">24</h2>
 					<p class="text-sm text-gray-500">Hotových lekcí</p>
 				</div>
